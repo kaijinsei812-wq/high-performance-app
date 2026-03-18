@@ -22,15 +22,17 @@ COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
 
-# 所有権変更
-RUN chown -R appuser:appuser /app
+# 起動スクリプト（マイグレーション → サーバー起動）
+COPY scripts/start.sh ./scripts/start.sh
+RUN chmod +x ./scripts/start.sh && chown -R appuser:appuser /app
 
 USER appuser
 
-EXPOSE 8000
+ENV PORT=8000
+EXPOSE $PORT
 
 # ヘルスチェック
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen(f'http://localhost:{__import__(\"os\").getenv(\"PORT\",\"8000\")}/health')" || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["./scripts/start.sh"]
