@@ -1,55 +1,46 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+from app.database import get_db
+from app import models, schemas, auth
 
-router = APIRouter()
+router = APIRouter(prefix="/items", tags=["Items"])
 
-class Item(BaseModel):
-    id: Optional[int] = None
-    name: str
-    description: Optional[str] = None
-    price: float
-    created_at: Optional[datetime] = None
+@router.get("/", response_model=List[schemas.ItemResponse])
+async def list_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    return db.query(models.Item).offset(skip).limit(limit).all()
 
-# In-memory store (後でDBに置き換え)
-items_db: List[Item] = []
-counter = 1
-
-@router.get("/items", response_model=List[Item], tags=["Items"])
-async def get_items():
-    return items_db
-
-@router.get("/items/{item_id}", response_model=Item, tags=["Items"])
-async def get_item(item_id: int):
-    for item in items_db:
-        if item.id == item_id:
-            return item
-    raise HTTPException(status_code=404, detail="アイテムが見つかりません")
-
-@router.post("/items", response_model=Item, tags=["Items"])
-async def create_item(item: Item):
-    global counter
-    item.id = counter
-    item.created_at = datetime.now()
-    items_db.append(item)
-    counter += 1
+@router.get("/{item_id}", response_model=schemas.ItemResponse)
+async def get_item(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(models.Item).filter(models.Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="アイテムが見つかりません")
     return item
 
-@router.put("/items/{item_id}", response_model=Item, tags=["Items"])
-async def update_item(item_id: int, updated: Item):
-    for i, item in enumerate(items_db):
-        if item.id == item_id:
-            updated.id = item_id
-            updated.created_at = item.created_at
-            items_db[i] = updated
-            return updated
-    raise HTTPException(status_code=404, detail="アイテムが見つかりません")
+@router.post("/", response_model=schemas.ItemResponse)
+async def create_item(item_in: schemas.ItemCreate, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
+    item = models.Item(**item_in.model_dump(), owner_id=current_user.id)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
 
-@router.delete("/items/{item_id}", tags=["Items"])
-async def delete_item(item_id: int):
-    for i, item in enumerate(items_db):
-        if item.id == item_id:
-            items_db.pop(i)
-            return {"message": "削除しました"}
-    raise HTTPException(status_code=404, detail="アイテムが見つかりません")
+@router.put("/{item_id}", response_model=schemas.ItemResponse)
+async def update_item(item_id: int, item_in: schemas.ItemUpdate, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
+    item = db.query(models.Item).filter(models.Item.id == item_id, models.Item.owner_id == current_user.id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="アイテムが見つかりません")
+    for k, v in item_in.model_dump().items():
+        setattr(item, k, v)
+    db.commit()
+    db.refresh(item)
+    return item
+
+@router.delete("/{item_id}")
+async def delete_item(item_id: int, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
+    item = db.query(models.Item).filter(models.Item.id == item_id, models.Item.owner_id == current_user.id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="アイテムが見つかりません")
+    db.delete(item)
+    db.commit()
+    return {"message": "削除しました"}
