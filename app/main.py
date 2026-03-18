@@ -1,7 +1,6 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.routers import health, items, auth
@@ -9,6 +8,7 @@ from app.database import engine
 from app import models
 from app.middleware import log_requests
 from app.limiter import limiter
+from app.metrics import setup_metrics
 import logging
 
 logging.basicConfig(
@@ -28,8 +28,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="High Performance App",
-    description="高性能APIサーバー - FastAPI / Python / PostgreSQL / JWT認証",
-    version="2.0.0",
+    description="高性能APIサーバー - FastAPI / Python / PostgreSQL / JWT認証 / Redis / Prometheus",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -50,3 +50,6 @@ app.middleware("http")(log_requests)
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(items.router, prefix="/api/v1")
+
+# Prometheusメトリクス (/metrics エンドポイント追加)
+setup_metrics(app)
