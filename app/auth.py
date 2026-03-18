@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app import models, schemas
+from app import models
 import os
 
 SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-change-in-production")
