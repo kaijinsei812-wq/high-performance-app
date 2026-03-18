@@ -1,35 +1,40 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models, schemas, auth
+from app.limiter import limiter
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
+
 
 @router.post("/register", response_model=schemas.UserResponse)
-async def register(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
-    if db.query(models.User).filter(models.User.email == user_in.email).first():
-        raise HTTPException(status_code=400, detail="このメールアドレスは既に登録されています")
-    if db.query(models.User).filter(models.User.username == user_in.username).first():
-        raise HTTPException(status_code=400, detail="このユーザー名は既に使用されています")
+@limiter.limit("5/minute")
+def register(request: Request, user_in: schemas.UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.User).filter(models.User.email == user_in.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="このメールアドレスはすでに登録されています")
     user = models.User(
         email=user_in.email,
         username=user_in.username,
-        hashed_password=auth.get_password_hash(user_in.password)
+        hashed_password=auth.get_password_hash(user_in.password),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
 
+
 @router.post("/token", response_model=schemas.Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = auth.authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="ユーザー名またはパスワードが間違っています")
-    access_token = auth.create_access_token(data={"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer"}
+@limiter.limit("10/minute")
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == form_data.username).first()
+    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="ユーザー名またはパスワードが正しくありません")
+    token = auth.create_access_token({"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
+
 
 @router.get("/me", response_model=schemas.UserResponse)
-async def me(current_user=Depends(auth.get_current_user)):
+def me(current_user: models.User = Depends(auth.get_current_user)):
     return current_user
