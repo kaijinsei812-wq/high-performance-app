@@ -11,11 +11,38 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/highperf_db
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - REDIS_URL=redis://redis:6379/0
+      - ACCESS_TOKEN_EXPIRE_MINUTES=15
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: .
+      target: production
+    command: celery -A app.worker worker --loglevel=info --concurrency=4
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/highperf_db
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - db
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: .
+      target: production
+    command: celery -A app.worker beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
     restart: unless-stopped
 
   db:
@@ -42,6 +69,32 @@ services:
       timeout: 5s
       retries: 3
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:
+  grafana_data:
